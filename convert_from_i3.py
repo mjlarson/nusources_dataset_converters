@@ -139,8 +139,8 @@ for i3filename in tqdm(args.input):
         truera, truedec = dir_to_equa(zenith=primary.dir.zenith,
                                       azimuth=primary.dir.azimuth,
                                       mjd = mjd)
-        ra, dec = dir_to_equa(zenith=primary.dir.zenith,
-                              azimuth=primary.dir.azimuth,
+        ra, dec = dir_to_equa(zenith=direction.dir.zenith,
+                              azimuth=direction.dir.azimuth,
                               mjd = mjd)
             
         #===========================================
@@ -159,7 +159,9 @@ for i3filename in tqdm(args.input):
         ow /= 2.0
 
         #===========================================
-        # And write it out
+        # And write it out. The order here MUST match
+        # the order in the `dtype` variable above or
+        # else you'll end up with wrong labels.
         #===========================================
         current_event = [header.run_id,         # run
                          header.sub_event_id,   # subevent
