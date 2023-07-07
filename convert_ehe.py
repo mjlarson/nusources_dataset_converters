@@ -71,7 +71,9 @@ class OneWeighter:
     def get(self):
         value_bins = np.searchsorted(self.cdf, np.random.uniform())
         true_e = self.bin_midpoints[value_bins]
-        return (true_e, self.propweights[self.index]/self.power_law_flux(true_e))
+        return_values = (true_e, self.propweights[self.index]/self.power_law_flux(true_e))
+	self.index += 1
+	return return_values
     
 #----------------------------------------------------
 # Pick the energy and direction...
