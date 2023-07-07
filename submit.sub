@@ -1,0 +1,17 @@
+executable = /usr/bin/env
+Arguments = $(cmd)
+
+# All logs will go to a single file 
+log = $(log_dir)/$(job_name).log
+output = $(log_dir)/$(job_name).out
+error = $(log_dir)/$(job_name).err
+
+getenv = False
+
+request_memory = 2000MB 
+request_disk = 1000MB 
+
+Universe        = vanilla 
+Notification    = never 
+
+queue
