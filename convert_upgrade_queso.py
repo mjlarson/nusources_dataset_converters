@@ -75,12 +75,6 @@ for i3filename in tqdm(args.input):
         if not frame['QuesoL3_Bool']: continue
         if not frame['QuesoL4_Bool']: continue
         if not frame['QuesoL3_Vars_cleaned_num_hits_fid_vol'] >= 7: continue
-
-        #===========================================
-        # Handle the weighting
-        #===========================================
-        # Still don't have the MC type? Try again now.
-
             
         #===========================================
         # Get the event information
@@ -126,6 +120,7 @@ for i3filename in tqdm(args.input):
         # train a BDT on.
         #===========================================
         sigma = (frame['graphnet_dynedge_direction_reconstruction_direction_kappa'].value)**-0.5
+        sigma = np.clip(sigma, 0, np.pi)
         
         bdt_vars = [frame['L4_separation_in_cogs'].value,
                     frame['SplitInIcePulses_dynedge_v2_PulsesUpgradeHitMultiplicity']['n_hit_pmts'],
