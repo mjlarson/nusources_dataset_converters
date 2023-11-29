@@ -70,6 +70,13 @@ for i3filename in tqdm(args.input):
         if not frame.Stop == icetray.I3Frame.Physics: continue
 
         #===========================================
+        # QUESO requires cuts to be applied. Do that.
+        #===========================================
+        if not frame['QuesoL3_Bool']: continue
+        if not frame['QuesoL4_Bool']: continue
+        if not frame['QuesoL3_Vars_cleaned_num_hits_fid_vol'] >= 7: continue
+
+        #===========================================
         # Handle the weighting
         #===========================================
         # Still don't have the MC type? Try again now.
@@ -113,11 +120,12 @@ for i3filename in tqdm(args.input):
         #===========================================
         # And maybe angular error... This will probably
         # need to be handled by a BDT regressor or other
-        # algorithm. We'll set a default value of 15 deg
-        # and add a bunch of variables that may be useful 
-        # as predictors to train a BDT on.
+        # algorithm. We'll use the value in the files as
+        # a first pass, but we'll also add a bunch of 
+        # variables that may be useful as predictors to 
+        # train a BDT on.
         #===========================================
-        sigma = 15*i3u.degree
+        sigma = (frame['graphnet_dynedge_direction_reconstruction_direction_kappa'].value)**-0.5
         
         bdt_vars = [frame['L4_separation_in_cogs'].value,
                     frame['SplitInIcePulses_dynedge_v2_PulsesUpgradeHitMultiplicity']['n_hit_pmts'],
