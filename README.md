@@ -11,17 +11,17 @@ The format we need to use is set by the [NuSources Data Format guide](https://wi
 - time: The MJD of the event. This is ignored for signal MC, but is necessary for time-independent analyses using scrambled data for background. Units are MJD days.
 - azi, zen: The best-fit azimuth and zenith from the selected reconstruction in radians. 
 - ra, dec: The equatorial coordinates in radians that you get by combining azimuth, zenith, and time. This can be calculated using either `astropy.coordinates` or `icecube.astro.dir_to_equa`.
-- angErr: The estimated angular uncertainty[^1] in radians. 
-- logE: The log10(reconstructed energy proxy/GeV)[^2]. 
+- angErr: The estimated angular uncertainty[1] in radians. 
+- logE: The log10(reconstructed energy proxy/GeV)[2]. 
 
-[^1]: Note that the "estimated angular uncertainty" is a different quantity from the "true angular error" and the "point spread function" ("PSF"): 
+[1]: Note that the "estimated angular uncertainty" is a different quantity from the "true angular error" and the "point spread function" ("PSF"): 
 - The angErr parameter is an observable and is calculated based on the hits in the detector (paraboloid, cramer-rao) or other reconstruction quantities for a single event. It is an estimate of the width of the likelihood space at the best-fit point, regardless of the distance to the truth. This is effectively "how sure is your reconstruction that this is the correct direction?". 
 - The "true angular error" is how far away your reconstruction really is from the true direction. Because this requires knowing a true direction, which is only possible in MC. 
 - The PSF is the distribution of the "true angular error" from an ensemble of events. 
 
 These quantities are often confused and sometimes the terms are used interchangeably. Please keep the differences in mind when discussing these uncertainties.
 
-[^2]: The values of the "reconstructed energy proxy" are not necessarily neutrino energies. They are instead a reconstructed value correlated with the energy in some way. This is most visible when discussing through-going muons:
+[2]: The values of the "reconstructed energy proxy" are not necessarily neutrino energies. They are instead a reconstructed value correlated with the energy in some way. This is most visible when discussing through-going muons:
 - A muon neutrino has a charged-current interaction far outside of the detector, producing a high energy muon
 - The muon passes an unknown distance in the uninstrumented ice, losing energy as it travels
 - The muon reaches and passes through the detector, depositing photons in the detector
@@ -66,13 +66,18 @@ optional arguments:
 #### Example usage:
 
 Convert 10 files in one run. This assumes we will *not* be including any other files from 140028.
-`python convert_upgrade_queso.py /data/sim/IceCubeUpgrade/genie/level4_queso/140028/upgrade_genie_level4_queso_140028_00000* -o upgrade_queso_140028.npy -n 10`
+
+```
+python convert_upgrade_queso.py /data/sim/IceCubeUpgrade/genie/level4_queso/140028/upgrade_genie_level4_queso_140028_00000* -o upgrade_queso_140028.npy -n 10
+```
 
 Convert 20 files total across two jobs.
+
 ```
 python convert_upgrade_queso.py /data/sim/IceCubeUpgrade/genie/level4_queso/140028/upgrade_genie_level4_queso_140028_00000* -o upgrade_queso_140028_0.npy -n 20
 python convert_upgrade_queso.py /data/sim/IceCubeUpgrade/genie/level4_queso/140028/upgrade_genie_level4_queso_140028_00001* -o upgrade_queso_140028_1.npy -n 20
 ```
 
 Combine these two files with
+
 `python3 combine.py -o upgrade_queso_140028.npy upgrade_queso_140028_*.npy`
