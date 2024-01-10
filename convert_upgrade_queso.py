@@ -14,6 +14,7 @@ from icecube import genie_reader
 
 try: from tqdm import tqdm
 except: tqdm = lambda x: x
+    
 
 #----------------------------------------------------
 # Build our argument parser.
@@ -138,12 +139,27 @@ for i3filename in tqdm(args.input):
         # as this is the only set of eg NuEBar, then we're good.
         #===========================================
         nevents = frame["I3GenieInfo"].n_flux_events
-        ow = frame["I3MCWeightDict"]["OneWeight"]
+        ow = mcweightdict["OneWeight"]
         ow /= (nevents * args.nfiles)
+        
+        #===========================================
+        # Take the opportunity to calculate atmospheric neutrino weights
+        # too, since the weights in the file are borked. To get them, we
+        # take the flux of nue at this energy and direction ("flux_e") and
+        # scale it by the oscillation probability to oscillate from nue to
+        # whatever flavor we're looking at ("prob_from_nue"). We then do the
+        # same for numu. Adding these gives us the total flux at our detector
+        # of this flavor after oscillations.
+        #===========================================
+        flux = (mcweightdict['flux_e'] * mcweightdict['prob_from_nue']
+                + mcweightdict['flux_mu'] * mcweightdict['prob_from_numu'])
+        atmo_weight = ow * flux
 
+        #===========================================
         # NuSources reports fluxes as the sum of nu and nubar fluxes.
         # To correctly handle this down the road, we need to correct
         # the oneweight values now by dividing by a factor of 2.
+        #===========================================
         ow /= 2.0
 
         #===========================================
@@ -165,8 +181,8 @@ for i3filename in tqdm(args.input):
                          ra,                    # ra
                          dec,                   # dec
                          sigma,                 # sigma
-                         mcweightdict['weight'],# Atmospheric weight
-        ]              + bdt_vars             # Extra variables for the bdt training
+                         atmo_weight,           # Atmospheric weight
+        ]              + bdt_vars               # Extra variables for the bdt training
         output.append(tuple(current_event))
 
 
