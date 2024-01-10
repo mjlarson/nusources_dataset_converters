@@ -31,6 +31,12 @@ parser.add_argument("--nfiles", "-n", type=int, action='store', required=True,
                            "jobs running on this script and including any that had 0 events passing!). Note that "
                            "this is the number of files from this specific dataset! So eg 10 files from 140028 "
                            " and 10 files from 141028 does *not* mean you should use --nfiles 20!")
+
+parser.add_argument("--muongun", "-m", action='store_true', default=False,
+                    help = "If specified, this file is from muongun instead of GENIE. Because we want this to "
+                           "work in cksy as a MC set for background calculations, we have to implement this by "
+                           "setting oneweight to 0 (which means these events will neer be used for signal generation "
+                           "with a non-zero atmospheric background weight (so they are used for background).")
                     
 args = parser.parse_args()
 
@@ -90,7 +96,8 @@ for i3filename in tqdm(args.input):
             mctree = sorted([key for key in frame if 'I3MCTree' in key])[0]
             primary = dataclasses.get_most_energetic_neutrino(frame[mctree])
 
-        mjd = 61041 # January 1, 2026
+        # Pick a random mjd? Makes it less confusing for other people looking at the dataset
+        mjd = np.random.uniform(61041, 61041+365) # January 1, 2026 to January 1, 2027
         truera, truedec = dir_to_equa(float(primary.dir.zenith), float(primary.dir.azimuth), float(mjd))
         pdg_encoding = primary.pdg_encoding
 
@@ -131,29 +138,46 @@ for i3filename in tqdm(args.input):
                     frame['graphnet_dynedge_energy_reconstruction_energy_pred'].value,
                     frame['graphnet_dynedge_track_classification_track_pred'].value]
 
-        #===========================================
-        # Oneweight nonsense. This is a placeholder that should
-        # work for cases when we have only non-overlapping MC sets
-        # (ie, only pulling files from one set of NuMu). Note that
-        # different flavors or nu vs nubar don't count here: as long
-        # as this is the only set of eg NuEBar, then we're good.
-        #===========================================
-        nevents = frame["I3GenieInfo"].n_flux_events
-        ow = mcweightdict["OneWeight"]
-        ow /= (nevents * args.nfiles)
-        
-        #===========================================
-        # Take the opportunity to calculate atmospheric neutrino weights
-        # too, since the weights in the file are borked. To get them, we
-        # take the flux of nue at this energy and direction ("flux_e") and
-        # scale it by the oscillation probability to oscillate from nue to
-        # whatever flavor we're looking at ("prob_from_nue"). We then do the
-        # same for numu. Adding these gives us the total flux at our detector
-        # of this flavor after oscillations.
-        #===========================================
-        flux = (mcweightdict['flux_e'] * mcweightdict['prob_from_nue']
-                + mcweightdict['flux_mu'] * mcweightdict['prob_from_numu'])
-        atmo_weight = ow * flux
+        if not args.muongun:
+            #===========================================
+            # Oneweight nonsense. This is a placeholder that should
+            # work for cases when we have only non-overlapping MC sets
+            # (ie, only pulling files from one set of NuMu). Note that
+            # different flavors or nu vs nubar don't count here: as long
+            # as this is the only set of eg NuEBar, then we're good.
+            #===========================================
+            nevents = frame["I3GenieInfo"].n_flux_events
+            ow = mcweightdict["OneWeight"]
+            ow /= (nevents * args.nfiles)
+            
+            #===========================================
+            # Take the opportunity to calculate atmospheric neutrino weights
+            # too, since the weights in the file are borked. To get them, we
+            # take the flux of nue at this energy and direction ("flux_e") and
+            # scale it by the oscillation probability to oscillate from nue to
+            # whatever flavor we're looking at ("prob_from_nue"). We then do the
+            # same for numu. Adding these gives us the total flux at our detector
+            # of this flavor after oscillations.
+            #===========================================
+            flux = (mcweightdict['flux_e'] * mcweightdict['prob_from_nue']
+                    + mcweightdict['flux_mu'] * mcweightdict['prob_from_numu'])
+            atmo_weight = ow * flux
+        else:
+            #===========================================
+            # MuonGun is atmospheric muon MC code. It's *not* signal for us, but
+            # we need it for background generation and so need to include it. The
+            # NuSources tools aren't set up to handle it, so we need to hammer it
+            # into a shape that it recognizes by treating it like a signal MC with
+            # no signal weight. We do this by setting OneWeight to 0.
+            #===========================================
+            ow = 0
+            
+            #===========================================
+            # And we get the atmospheric weight from the file directly. This will
+            # get used by csky when we ask for background events. Remember to 
+            # divide by the number of files!
+            #===========================================
+            atmo_weight = mcweightdict['weight'] / args.nfiles
 
         #===========================================
         # NuSources reports fluxes as the sum of nu and nubar fluxes.
@@ -176,7 +200,7 @@ for i3filename in tqdm(args.input):
                          truedec,               # trueDec
                          primary.dir.azimuth,   # trueAzi
                          primary.dir.zenith,    # trueZen
-                         mcweightdict['PrimaryNeutrinoEnergy'], # trueE
+                         primary.energy,        # trueE
                          np.log10(energy),      # logE
                          ra,                    # ra
                          dec,                   # dec

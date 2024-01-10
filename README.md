@@ -81,3 +81,8 @@ python convert_upgrade_queso.py /data/sim/IceCubeUpgrade/genie/level4_queso/1400
 Combine these two files with
 
 `python3 combine.py -o upgrade_queso_140028.npy upgrade_queso_140028_*.npy`
+
+
+Converting MuonGun files works by specifying one additional flag at runtime to tell the code what's happening.
+
+`python convert_upgrade_queso.py /data/sim/IceCubeUpgrade/muongun/level4_queso/131028/upgrade_muongun_level4_queso_131028_0000*.i3.zst -o upgrade_queso_130028.npy -n 100 -m`
