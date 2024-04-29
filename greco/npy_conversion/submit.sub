@@ -1,0 +1,20 @@
+executable = /usr/bin/env
+Arguments = $(cmd)
+
+# All logs will go to a single file 
+log = /dev/null
+output = /dev/null
+error = /dev/null
+
+initialdir = /data/user/mlarson/combo_r129072/scripts/greco_online/skylab_dataset/v2.5/simplified/nusources_dataset_converters/greco/npy_conversion/
+# but do not try to copy outputs back (see: https://htcondor-wiki.cs.wisc.edu/index.cgi/tktview?tn=3081) 
++TransferOutput="" 
+
+request_memory = 2000MB 
+request_disk = 1000MB 
+
+Universe        = vanilla 
+Notification    = never 
+
+# GO! 
+queue
