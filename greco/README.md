@@ -25,3 +25,26 @@ python3 /data/user/mlarson/combo_r129072/scripts/greco_online/skylab_dataset/v2.
 
 The command should include every sub-file created. This script will check that the vast majority of events in the pre-file have passed. In some cases, you'll see fewer events post-reconstruction than you had pre-reconstruction. This is due to various fit status checks during the processing and should only make up a small fraction of the events of O(1%).
 
+
+### Converting to npy
+
+We then want to convert the (merged) i3 files to npy format. For that, we have `convert_greco.py`. To run this script, we need a very specific version of things (specifically, scikit-learn) in order to be able to read Alex Pizzuto's BDT (point your annoyed growling toward sklearn, not me). Load up a cvmfs environment with py3-v4.1.1 and set up a virutal environment:
+
+```
+eval `/cvmfs/icecube.opensciencegrid.org/py3-v4.1.1/setup.sh`
+python3 -m venv greco_npy_env
+source ./greco_npy_env/bin/activate
+pip install scikit-learn==0.23.1
+```
+
+You should then be able to run the converter.
+```
+./convert_greco.py -o ./test.npy --genie-icetray ../../output/numu/NuMu_140000_000266_level2.i3.bz2 
+```
+
+This will convert a single file. You can convert many files at once, however.
+```
+./convert_greco.py -o ./test.npy --genie-icetray ../../output/numu/*
+```
+
+Note that this is a rather slow process: converting a single file takes ~5 minutes or so. Converting a large number of files at once is probably prohibitive. Instead, you should submit jobs to extract each i3 file individually, then merge them with `np.concatenate`.

@@ -1,18 +1,16 @@
-#!/bin/sh /cvmfs/icecube.opensciencegrid.org/py3-v4.2.1/icetray-start
-#METAPROJECT icetray/v1.5.1
+#!/bin/sh /cvmfs/icecube.opensciencegrid.org/py3-v4.1.1/icetray-start
+#METAPROJECT icetray/v1.3.3
 #!/usr/bin/env python3
 
 import os, sys, pickle
 from argparse import ArgumentParser
 import numpy as np
 import numpy.lib.recfunctions as rf
+import sklearn
 
-from icecube import dataclasses, dataio, icetray
-from icecube.icetray import I3Units as i3u
+from icecube import dataclasses, dataio, icetray, recclasses, dst, millipede
+from icecube.icetray import I3Units
 from icecube.astro import dir_to_equa
-from icecube import genie_reader
-
-import healpy as hp
 
 try: from tqdm import tqdm
 except: tqdm = lambda x: x
@@ -27,17 +25,24 @@ parser.add_argument("input", metavar="i3file", type=str,
 parser.add_argument("--output", "-o", dest="output", type=str,
                     action = "store", default="", required=True,
                     help = "The output npy filename and path to write to")
-parser.add_argument("--nfiles", "-n", type=int, action='store', required=True,
+parser.add_argument("--nfiles", "-n", type=int, action='store', default=-1,
                     help = "Number of files from this dataset that will be converted in total (ie, across all "
                            "jobs running on this script and including any that had 0 events passing!). Note that "
-                           "this is the number of files after re-merging for this specific dataset/flavor!")
-parser.add_argument("--genie-icetray", "-g", type=bool, action='store_true', default=False,
+                           "this is the number of files after re-merging for this specific dataset/flavor! If "
+                           "this is not specified, we will simply count the number of input files.")
+parser.add_argument("--genie-icetray", "-g", action='store_true', default=False,
                     help = "If given, assume we're using oscnext/genie-icetray style weighting")
-parser.add_argument("--genie-reader", type=bool, action='store_true', default=False,
+parser.add_argument("--genie-reader", action='store_true', default=False,
                     help = "If given, assume we're using upgrade/genie-reader style weighting")
-parser.add_argument("--nugen", type=bool, action='store_true', default=False,
+parser.add_argument("--nugen", action='store_true', default=False,
                     help = "If given, assume we're using nugen style weighting")
 args = parser.parse_args()
+
+if args.nfiles < 0:
+    print("No number of files specified. I'll fall back on just counting the number of input files instead. "
+         "This is fine for GENIE events where every file is expected to give "
+         "at least some events, but is almost certainly wrong for nugen!")
+    args.nfiles = len(args.input)
 
 #----------------------------------------------------
 # Load the BDT regressor for our angular error
@@ -47,7 +52,7 @@ args = parser.parse_args()
 # /data/user/apizzuto/Nova/RandomForests/v2.5/GridSearchResults_logSeparation_True_bootstrap_True_minsamples_100
 #----------------------------------------------------
 model_file = '/data/ana/PointSource/GRECO_online/regressor_logSeparation_True_bootstrap_True_minsamples_100.pckl'
-regressor = pickle.load(open(model_file, 'rb').best_estimator_
+regressor = pickle.load(open(model_file, 'rb')).best_estimator_
 
 #----------------------------------------------------
 # Set up our output
@@ -58,7 +63,7 @@ dtype = [('run', np.int32), ('subevent', np.int32), ('event', np.int64),
          ('logE', np.float32), ('ra', np.float32), ('dec', np.float32), 
          ('angErr', np.float32), ('uncorrected_angErr', np.float32)]
 
-if any([args.genie_icetray, args.genie_reader, arg.nugen]):
+if any([args.genie_icetray, args.genie_reader, args.nugen]):
     mc_dtypes = [('ow', np.float64),
                  ('uncorrected_ow', np.float64),
                  ('trueE', np.float32), 
@@ -138,7 +143,7 @@ for i3filename in tqdm(args.input):
         # -----------
         if 'I3DST' in frame.keys():
             i3dst = frame['I3DST']
-            regressor_features.append(nstring)        # nstring
+            regressor_features.append(i3dst.n_string) # nstring
             regressor_features.append(i3dst.ndom)     # nchannel
         else:
             regressor_features.extend([-1, -1])
@@ -159,7 +164,7 @@ for i3filename in tqdm(args.input):
         # monopod azi, zen
         # -----------
         monopod = frame['Monopod_best']
-        regressor_features.append(monopod_dir.zenith) # monopod_zen
+        regressor_features.append(monopod.dir.zenith) # monopod_zen
         
         # -----------
         # PID LLH values
@@ -174,7 +179,7 @@ for i3filename in tqdm(args.input):
         # -----------
         # PID track length
         # -----------
-        bdt_values.append(track.length)                     # PIDLength
+        regressor_features.append(track.length)             # PIDLength
         
         # -----------
         # And the angle between monopod and pegleg
@@ -182,15 +187,14 @@ for i3filename in tqdm(args.input):
         monopod_ra, monopod_dec = dir_to_equa(zenith=float(monopod.dir.zenith),
                                               azimuth=float(monopod.dir.azimuth),
                                               mjd = float(mjd))
-        monopod_pegleg_dpsi = hp.rotator.angdist(np.rad2deg([ra, dec]),
-                                                 np.rad2deg(monopod_ra, monopod_dec),
-                                                 lonlat = True)
+        monopod_pegleg_dpsi = monopod.dir.angle(track.dir)
         regressor_features.append(monopod_pegleg_dpsi)      # monopod_pegleg_dpsi
 
         #===========================================
         # Actually get the sigma value from the bdt
         #===========================================
-        angErr = 10**regressor.predict(regressor_features)
+        
+        angErr = 10**regressor.predict(np.array(regressor_features)[None,:])
 
         # And make sure to remove the zen/logE from the regressor features
         # once they're no longer needed there.
@@ -207,14 +211,15 @@ for i3filename in tqdm(args.input):
             # extra information from the file.
             #===========================================
             mcweightdict = frame['I3MCWeightDict']
-            pdg_encoding = primary.pdg_encoding
             is_cc = (mcweightdict['InteractionType'] == 1)
 
             # Find the primary
-            try: primary = frame['MCInIcePrimary']
-            except:
-                mctree = sorted([key for key in frame if 'I3MCTree' in key])[0]
-                primary = dataclasses.get_most_energetic_neutrino(frame[mctree])
+            if 'I3MCTree_preMuonProp' in frame:
+                mctree = frame['I3MCTree_preMuonProp']
+            else:
+                mctree = frame['I3MCTree']
+            primary = dataclasses.get_most_energetic_neutrino(mctree)
+            pdg_encoding = primary.pdg_encoding
 
             # Get the direction of the true neutrino
             truera, truedec = dir_to_equa(float(primary.dir.zenith), float(primary.dir.azimuth), float(mjd))
@@ -248,6 +253,20 @@ for i3filename in tqdm(args.input):
             #===========================================
             ow /= 2.0
 
+            #===========================================
+            # We also store the r/z of the interaction 
+            # position relative to the genie-reader 
+            # generation cylinder. This can be used
+            # to merge nugen/genie if we're not using
+            # simweights like normal people.
+            #===========================================
+            genie_vol_r = 0
+            genie_vol_z = 0
+
+
+            #===========================================
+            # Store it all in a single list
+            #===========================================
             mc_values = [ow,                    # ow
                          ow,                    # uncorrected_ow
                          primary.energy,        # trueE
