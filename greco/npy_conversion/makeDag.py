@@ -20,7 +20,7 @@ for flavor in ['nue', 'numu', 'nutau']:
         base = basename(f)
         base = base[:base.index(".i3")]
 
-        cmd = "/data/user/mlarson/combo_r129072/scripts/greco_online/skylab_dataset/v2.5/simplified/nusources_dataset_converters/greco/npy_conversion/convert_greco.py"
+        cmd = "/data/user/mlarson/combo_r129072/scripts/greco_online/skylab_dataset/v2.5/simplified/nusources_dataset_converters/greco/npy_conversion/convert_greco_andrew.py"
         cmd += " --output {}".format(join(outdir, flavor, basename(f)))
         cmd += " --nfiles {}".format(len(filenames))
         cmd += " --genie-icetray"
