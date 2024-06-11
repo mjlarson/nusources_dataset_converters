@@ -351,8 +351,17 @@ def main():
     #-----------------------------------------------------
     # Calculate the angular uncertainty from Alex Pizzuto's BDT
     #-----------------------------------------------------
-    output['angErr'] = predict_uncertainty(output)
     output['uncorrected_angErr'] = output['angErr']
+
+    # And apply the original pull corrections
+    south_spline = pickle.load(open("pull_correction_splines/greco_north_e-3.pckl", 'rb'), encoding='latin1')
+    north_spline = pickle.load(open("pull_correction_splines/greco_south_e-3.pckl", 'rb'), encoding='latin1')
+
+    south = (output['dec'] <= np.radians(-5))
+    north = ~south
+    
+    output['angErr'][south] = output['uncorrected_angErr'][south] / south_spline(output['logE'][south])
+    output['angErr'][north] = output['uncorrected_angErr'][north] / north_spline(output['logE'][north]) 
     
     #----------------------------------------------------
     # and finally save it
