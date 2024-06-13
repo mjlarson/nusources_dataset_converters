@@ -7,8 +7,9 @@ from argparse import ArgumentParser
 import numpy as np
 import numpy.lib.recfunctions as rf
 import sklearn
+import copy
 
-from icecube import dataclasses, dataio, icetray, recclasses, dst, millipede
+from icecube import dataclasses, dataio, icetray, recclasses, dst, millipede, common_variables, recclasses
 from icecube.icetray import I3Units
 from icecube.astro import dir_to_equa
 
@@ -44,6 +45,8 @@ def main():
                         help = "If given, assume we're using nugen style weighting")
     parser.add_argument("--test", action="store_true", default=False,
                         help = "If given, only process the first 10 files.")
+    parser.add_argument('--lowen_bound', help='Keep events above this energy', default=1, dtype=float)
+    parser.add_argument('--highen_bound', help='Keep events below this energy', default=10**3.5, dtype=float)
     args = parser.parse_args()
 
     if args.nfiles < 0:
@@ -52,6 +55,9 @@ def main():
              "at least some events, but is almost certainly wrong for nugen!")
         args.nfiles = len(args.input)
 
+    assert args.highen_bound > args.lowen_bound, (f'Upper energy bound ({args.highen_bound}) cannot be '
+                                                  f'less than/equal to lower energy bound ({args.})!')
+
     #----------------------------------------------------
     # Set up our output
     #----------------------------------------------------
@@ -59,7 +65,7 @@ def main():
     dtype = [('run', np.int32), ('subevent', np.int32), ('event', np.int64),
              ('time', np.float64), 
              ('logE', np.float32), ('ra', np.float32), ('dec', np.float32), 
-             ('angErr', np.float32), ('uncorrected_angErr', np.float32)]
+             ('angErr', np.float32), ('angErr_noCorrection', np.float32)]
     
     if any([args.genie_icetray, args.genie_reader, args.nugen]):
         mc_dtypes = [('ow', np.float64),
@@ -114,6 +120,13 @@ def main():
         print(i3filename)
         i3file = dataio.I3FrameSequence([args.gcd, i3filename,])
 
+        while i3file.more(): # save the geometry, used for QDirPulses calculation later
+            frame = i3file.pop_frame()
+
+            if frame.Stop == icetray.I3Frame.Geometry:
+                geometry = frame['I3Geometry']
+                break
+
         while i3file.more():
             frame = i3file.pop_frame()
 
@@ -136,7 +149,8 @@ def main():
 
             # The reconstructed (neutrino) energy
             energy = track.energy + casc.energy
-            if energy < 1: continue
+                
+            if (energy < args.lowen_bound) or (energy > args.highen_bound): continue
 
             # Directional reco
             azimuth = track.dir.azimuth
@@ -218,12 +232,19 @@ def main():
             regressor_features.append(casc.pos.z)
 
             #===========================================
-            # And (eventually) some measure of the direct charge
-            # This is probably going to need to come from the 
-            # CommonVariables project, but I don't want to deal
-            # with it right now.
+            # And some measure of the direct charge
+            # We'll include the definition from pstracks here,
+            # although it doesn't get used...?
             #===========================================
-            regressor_features.append(-1)
+            definitions = common_variables.direct_hits.get_default_definitions()
+            definitions.append(common_variables.direct_hits.I3DirectHitsDefinition("E",-15.,250.)) 
+            
+            pulsemapmask_name = 'SRTInIcePulses'
+            pulsemap = dataclasses.I3RecoPulseSeriesMap.from_frame(frame, pulsemapmask_name)
+            particle = frame['Pegleg_Fit_Nestle']
+            ndir_map = common_variables.direct_hits.calculate_direct_hits(definitions, geometry, pulsemap, particle)
+            qdir = ndir_map['A'].q_dir_pulses # [-15ns; +15ns] time window
+            regressor_features.append(qdir)
 
             #===========================================
             # Check if we're dealing with MC events
@@ -328,7 +349,7 @@ def main():
                              ra,                    # (reco) ra
                              dec,                   # (reco) dec
                              0,                     # angErr
-                             0,                     # uncorrected_angErr
+                             0,                     # angErr_noCorrection
                             ]
 
             # If available, add the MC columns too
@@ -347,11 +368,14 @@ def main():
     # Convert the output list into a numpy array
     #----------------------------------------------------
     output = np.array(output, dtype=dtype)
-    
+    if len(output) == 0:
+        raise ValueError('Output array has zero elements! Panic!')
+
     #-----------------------------------------------------
     # Calculate the angular uncertainty from Alex Pizzuto's BDT
     #-----------------------------------------------------
-    output['uncorrected_angErr'] = output['angErr']
+    output['angErr'] = predict_uncertainty(output)
+    output['angErr_noCorrection'] = copy.deepcopy(output['angErr'])
 
     # And apply the original pull corrections
     south_spline = pickle.load(open("pull_correction_splines/greco_north_e-3.pckl", 'rb'), encoding='latin1')
@@ -360,9 +384,8 @@ def main():
     south = (output['dec'] <= np.radians(-5))
     north = ~south
     
-    output['angErr'][south] = output['uncorrected_angErr'][south] / south_spline(output['logE'][south])
-    output['angErr'][north] = output['uncorrected_angErr'][north] / north_spline(output['logE'][north]) 
-    
+    output['angErr'][south] = output['angErr_noCorrection'][south] / south_spline(output['logE'][south])
+    output['angErr'][north] = output['angErr_noCorrection'][north] / north_spline(output['logE'][north])
     #----------------------------------------------------
     # and finally save it
     #----------------------------------------------------
