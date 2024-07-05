@@ -3,6 +3,7 @@
 #!/usr/bin/env python3
 
 import os, sys, pickle, glob
+from os.path import dirname, join
 from argparse import ArgumentParser
 import numpy as np
 import numpy.lib.recfunctions as rf
@@ -45,8 +46,8 @@ def main():
                         help = "If given, assume we're using nugen style weighting")
     parser.add_argument("--test", action="store_true", default=False,
                         help = "If given, only process the first 10 files.")
-    parser.add_argument('--lowen_bound', help='Keep events above this energy', default=1, dtype=float)
-    parser.add_argument('--highen_bound', help='Keep events below this energy', default=10**3.5, dtype=float)
+    parser.add_argument('--lowen_bound', help='Keep events above this energy', default=1, type=float)
+    parser.add_argument('--highen_bound', help='Keep events below this energy', default=10**3.5, type=float)
     args = parser.parse_args()
 
     if args.nfiles < 0:
@@ -56,7 +57,7 @@ def main():
         args.nfiles = len(args.input)
 
     assert args.highen_bound > args.lowen_bound, (f'Upper energy bound ({args.highen_bound}) cannot be '
-                                                  f'less than/equal to lower energy bound ({args.})!')
+                                                  f'less than/equal to lower energy bound ({args.lowen_bound})!')
 
     #----------------------------------------------------
     # Set up our output
@@ -378,8 +379,9 @@ def main():
     output['angErr_noCorrection'] = copy.deepcopy(output['angErr'])
 
     # And apply the original pull corrections
-    south_spline = pickle.load(open("pull_correction_splines/greco_north_e-3.pckl", 'rb'), encoding='latin1')
-    north_spline = pickle.load(open("pull_correction_splines/greco_south_e-3.pckl", 'rb'), encoding='latin1')
+    pull_path = join(dirname(__file__), "pull_correction_splines/")
+    south_spline = pickle.load(open(join(pull_path,"greco_north_e-3.pckl"), 'rb'), encoding='latin1')
+    north_spline = pickle.load(open(join(pull_path,"greco_south_e-3.pckl"), 'rb'), encoding='latin1')
 
     south = (output['dec'] <= np.radians(-5))
     north = ~south

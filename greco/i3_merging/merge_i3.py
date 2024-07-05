@@ -66,10 +66,13 @@ def make_particles(frame):
     frame['Pegleg_Fit_NestleTrack'] = track
     return
 
-def read(prereco, postreco, output_filename, tolerance):
+def read(gcd, prereco, postreco, output_filename, tolerance):
     output = dataio.I3File(output_filename, 'w')
     all_good = True
-    
+
+    for frame in dataio.I3File(gcd):
+        output.push(frame)
+        
     events_passing_prereco = []
 
     for filename in sorted(prereco):
@@ -141,6 +144,7 @@ if __name__ == "__main__":
     import time
     import argparse
     parser = argparse.ArgumentParser()
+    parser.add_argument("--gcd", type=str, default="", action='store', required=True)
     parser.add_argument("--pre", type=str, default=[], action='append', required=True)
     parser.add_argument("--post", type=str, default=[], action='append', required=True)
     parser.add_argument("--output", type=str, required=True)
@@ -158,7 +162,7 @@ if __name__ == "__main__":
     print("Will accept differences up to {} events.".format(args.tol))
     
     start = time.time()
-    read(args.pre, args.post, args.output, tolerance=args.tol,)
+    read(args.gcd, args.pre, args.post, args.output, tolerance=args.tol,)
     proc_time = time.time() - start
     
     print("Finished. Processing took {:4.3f} seconds".format(proc_time))
