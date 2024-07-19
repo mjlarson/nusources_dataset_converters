@@ -44,6 +44,21 @@ def em_to_hadronic(em_energy):
     #print(em_energy, result.root, em_energy > result.root)
     return result.root
     
+def check(frame):
+    seeds = ["MPEFitMuEX", "grecoGRECO_FirstHit", "grecoGRECO_SPEFit11",]
+    required = ["SRTInIcePulses",]#"OfflinePulsesTimeRange"]
+    for seed in seeds:
+        if seed not in frame: 
+            print(f"Seed {seed} is missing from frame.")
+            return False
+        if frame[seed].fit_status != dataclasses.I3Particle.OK: 
+            print(f"Seed {seed} is not okay.")
+            return False
+    for key in required:
+        if key not in frame: 
+            print(f"Key {key} is missing from the frame")
+            return False
+    return True
 
 def make_particles(frame):
     particles = frame['Pegleg_Fit_NestleParticles']
@@ -81,6 +96,7 @@ def read(gcd, prereco, postreco, output_filename, tolerance):
         for frame in i3file:
             if frame.Stop != icetray.I3Frame.Physics:
                 continue
+            if not check(frame): continue
             event = frame['I3EventHeader'].event_id
             events_passing_prereco.append(event)
         i3file.close()
@@ -102,6 +118,8 @@ def read(gcd, prereco, postreco, output_filename, tolerance):
                 output.push(frame)
                 continue
             
+            if not check(frame): continue
+
             if 'Pegleg_Fit_NestleParticles' not in frame:
                 print("Not reconstructed")
                 #all_good = False
@@ -128,6 +146,8 @@ def read(gcd, prereco, postreco, output_filename, tolerance):
     if not all_good:
         os.remove(output_filename)
         return False
+    elif len(events_passing_prereco) == len(events_passing_postreco):
+        print("Events match!")
     elif len(events_passing_prereco) - len(events_passing_postreco) < tolerance:
         print("Found a different number of events pre ({}) vs post ({}) reco.".format(len(events_passing_prereco),
                                                                                       len(events_passing_postreco)))
@@ -145,7 +165,7 @@ if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument("--gcd", type=str, default="", action='store', required=True)
-    parser.add_argument("--pre", type=str, default=[], action='append', required=True)
+    parser.add_argument("--pre", type=str, default=[], action='append')
     parser.add_argument("--post", type=str, default=[], action='append', required=True)
     parser.add_argument("--output", type=str, required=True)
     parser.add_argument("--tol", type=int, default=20)
