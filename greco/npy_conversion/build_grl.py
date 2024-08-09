@@ -1,6 +1,5 @@
 import os, sys, numpy as np
 import numpy.lib.recfunctions as rf
-import json
 import argparse
 import copy
 from shutil import copyfile
@@ -9,6 +8,12 @@ from os.path import basename, join
 from astropy.time import Time
 from tqdm import tqdm
 
+def read_from_allruns(filename):
+    for line in allruns[1:]:
+        run = line.split(',')[0]
+        if ("GOOD,GOOD" in line) and ("partial" not in line.lower()):
+            good_runs.append(int(run))
+    return np.array(good_runs, dtype=int)
 
 def main(args):
     # ----------------------------------------------
@@ -28,18 +33,20 @@ def main(args):
             copyfile(f, join(new_path, basename(f)))
         return
 
-    def blank_grl(i3live_json):
-        grl_from_live = json.load(open(i3live_json, 'r'))['runs']
+    def blank_grl(filename):
+        allruns = open(filename, 'r').readlines()
+        output = []
         dtype = np.dtype([('run', int), 
                           ('start', np.float64), ('stop', np.float64),
                           ('livetime', np.float32), ('events', int)])
 
-        output = []
-        for entry in tqdm(grl_from_live):
-            if not entry['good_i3']: continue
-            start = Time(entry['good_tstart']).to_value('mjd')
-            stop = Time(entry['good_tstop']).to_value('mjd')
-            output.append((entry['run'], start, stop, stop-start, 0))
+        for line in allruns[1:]:
+            splits = line.split(",")
+            if ("GOOD,GOOD" not in line) or ("partial" in line.lower()):
+                continue
+            run = int(splits[0])
+            start, stop = Time(splits[2:4]).to_value("mjd")
+            output.append((run, start, stop, stop-start, 0))
 
         output = np.array(output, dtype=dtype)
         return output[np.argsort(output['run'])]
