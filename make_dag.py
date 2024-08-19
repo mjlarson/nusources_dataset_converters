@@ -1,5 +1,7 @@
 #!/usr/env python3
-import os, sys, glob
+import os, sys
+from glob import glob
+from tqdm import tqdm
 import numpy as np
 
 #########################################
@@ -11,17 +13,22 @@ import numpy as np
 ########################################
 # Set up your paths and variables that you want to use
 ########################################
-indir = "/data/i3store/users/baclark/juliet/level5/"
+indir_base = "/data/ana/PointSource/PS/version-005-p00/"
+indirs = []
 
-n_per_group = 100
+indirs = sorted(glob(os.path.join(indir_base, "IC86*/i3/")))
+ngroup = 100
 
-script = "/data/condor_builds/users/mlarson/nusources_dataset_converters/convert_ehe.py"
-submit_file = "/data/condor_builds/users/mlarson/nusources_dataset_converters/submit.sub"
+indirs += sorted(glob(os.path.join(indir_base, "IC86.2014/mc/*/i3/")))
+ngroup = 100
 
-dag_name = "ehe.dag"
+current = os.path.expandvars("$PWD")
+script = os.path.join(current,"convert_pstracks.py")
+submit_file = os.path.join(current,"submit.sub")
 
-outdir = "/data/condor_builds/users/mlarson/nusources_dataset_converters/output/"
-logdir = "/data/condor_builds/users/mlarson/nusources_dataset_converters/logs/"
+dag_name = "pstracks_npy.dag"
+
+logdir = os.path.join(current, "logs_pstracks/")
 
 ########################################
 # Make a string where we can store our file contents
@@ -31,36 +38,37 @@ dag_contents = ""
 ########################################
 # Start looping over things 
 ########################################
-for dataset in glob.glob(os.path.join(indir, "*")):
-    if "old" in dataset.lower(): continue
-
+for dataset in indirs:
     # group the files
-    filenames = sorted(glob.glob(os.path.join(dataset, "*/*/*.i3*")))
-    filename_groups = [[],]
-    for i, f in enumerate(filenames):
-        if len(filename_groups[-1]) >= n_per_group:
-            filename_groups.append([])
-        filename_groups[-1].append(f)
-        
-    
+    filenames = sorted(glob(os.path.join(dataset, "*upgoing*.i3*")))
+    nfiles = len(filenames)
     
     # every job needs a unique name.
-    base_job_name = "ehe_{}".format(os.path.basename(dataset))
-    print(base_job_name, len(filenames))
+    run_folder = dataset.split("/")[-3]
 
-    for groupnum, group in enumerate(filename_groups):
-        if len(group) == 0: continue
-        job_name = f"{base_job_name}_{groupnum}"
+    # Group by ngroup
+    groups = []
+    while len(filenames) > 0:
+        group, filenames = filenames[:ngroup], filenames[ngroup:]
+        groups.append(group)
+
+    print(f"Adding {run_folder} with {nfiles} files in {len(groups)} groups")
+
+    printed = False
+    for group in groups:
+        job_name = f"PSTracks_{group[0]}_group{ngroup}".replace(".","_")
     
-        # And an output file name
-        outfile = os.path.join(outdir, job_name+".npy")
-        
+        outdir = os.path.dirname(group[0])
+        outdir = outdir.replace("/i3", "/npy")
+        if not printed:
+            print(outdir)
+            printed = True
+
         # Write out the command that you want condor to run
         cmd = "{} ".format(script)
-        cmd += "--outfile {} ".format(outfile)
-        cmd += f"-n {len(filenames)} "
-        for f in group:
-            cmd += "{} ".format(f)
+        cmd += f" --outdir {outdir}"
+        for filename in group:
+            cmd += f" {filename}" 
             
         # Now we start writing Condor stuff.
         # We'll start with the basic stuff that's always here
@@ -72,7 +80,6 @@ for dataset in glob.glob(os.path.join(indir, "*")):
         dag_contents += f" cmd=\"{cmd}\" "
         dag_contents += "\n"
         
-
 ########################################
 # Write the dag file out
 ########################################

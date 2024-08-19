@@ -1,74 +1,35 @@
+#!/bin/sh /cvmfs/icecube.opensciencegrid.org/py3-v4.3.0/icetray-start
+#METAPROJECT icetray/v1.11.1
 #!/usr/bin/env python3
 
-import os, sys
+import os, sys, pickle
 from glob import glob
 from argparse import ArgumentParser
 import numpy as np
 import numpy.lib.recfunctions as rf
+import scipy
+from scipy import interpolate
 
 from icecube import dataclasses, dataio, icetray, simclasses, paraboloid
-from icecube.icetray import I3Units as i3u
+from icecube.icetray import I3Units
 from icecube.astro import dir_to_equa
 
 try: from tqdm import tqdm
 except: tqdm = lambda x: x
 
 #----------------------------------------------------
-# Build our argument parser.
+# Write a function to process a single file
 #----------------------------------------------------
-parser = ArgumentParser(description="Base script for converting i3 files to NuSources-compatible"
-                        " npy files for use in csky and skyllh.")
-parser.add_argument("input", metavar="i3file", type=str,
-                    nargs="+", default=[],
-                    help='Directory or file to include')
-parser.add_argument("--output", "-o", dest="output", type=str,
-                    action = "store", default="", required=True,
-                    help = "The output npy filename and path to write to")
-parser.add_argument("--nfiles", "-n", type=int, action='store', required=True,
-                    help = "Number of files initially processed (including any that had 0 events passing!)")
-parser.add_argument("--nu_fraction", type=float, action="store", default=0.5,
-                    help="What fraction of this simulation is neutrinos? Note that if there's an S-frame that's"
-                    " compatible with simweights or a TypeWeight key in the I3MCWeightDict, this option will be"
-                    " ignored in favor of what's in the file.")
-parser.add_argument("--test", action='store_true', default=False,
-                    help="If given, only process 10 files.")
-args = parser.parse_args()
-
-
-#----------------------------------------------------
-# Set up our output
-#----------------------------------------------------
-output = []
-dtype = [('run', np.int64), ('subevent', np.int32), ('event', np.int64),
-         ('time', np.float64), ('logE', np.float32),
-         ('ra', np.float32), ('dec', np.float32), 
-         ('sigma', np.float32), ('sigma_noCorrection', np.float32),
-         ('passed_IceTopVeto', bool)]
-
-is_mc = False
-mc_output = []
-mc_dtype = [('ow', np.float64), ('trueE', np.float32),
-            ('trueRa', np.float32), ('trueDec', np.float32),
-            ('trueAzi', np.float32), ('trueZen', np.float32)]
-
-#----------------------------------------------------
-# Build the file list from the input
-#----------------------------------------------------
-filelist = []
-for path in args.input:
-    if os.path.isdir(path):
-        filelist += glob(os.path.join(path, "*.i3*"))
-    elif os.path.isfile(path):
-        filelist.append(path)
-
-if args.test and len(filelist) > 10:
-    filelist = filelist[:10]
-
-#----------------------------------------------------
-# Start walking through the files
-#----------------------------------------------------
-for i3filename in tqdm(filelist):
-    i3file = dataio.I3File(i3filename, 'r')
+def process_file(upgoing_filename,
+                 downgoing_filename,
+                 outdir,
+                 upgoing_spline, 
+                 downgoing_spline, 
+                 zen_up_down_split = 85*I3Units.degree, 
+                 nu_fraction = 0.5):
+    output, ids = [], []
+    is_mc = False
+    i3file = dataio.I3FrameSequence([upgoing_filename, downgoing_filename])
 
     while i3file.more():
         frame = i3file.pop_frame()
@@ -82,27 +43,45 @@ for i3filename in tqdm(filelist):
         # Get the event information
         #===========================================
         header = frame['I3EventHeader']
+
+        # Check if we've already seen this event to avoid duplicates
+        event_id = (header.run_id, header.sub_event_id, header.event_id)
+        if event_id in ids: continue
+        ids.append(event_id)
+
         mjd = header.start_time.mod_julian_day_double
 
         # And the recos
         direction = frame['SplineMPE_l4'].dir
         energy = frame['SplineMPEMuEXDifferential'].energy
 
-        # And the estimated angular uncertainty. 
-        # I think this should have a sindec term, but 
-        # this matches what was done in the past for now.
-        if frame['SplineMPE_l4Paraboloid'].fit_status == 0:
-            sigma = np.hypot(frame['SplineMPE_l4ParaboloidFitParams'].pbfErr1, 
-                             frame['SplineMPE_l4ParaboloidFitParams'].pbfErr2) / np.sqrt(2)
-        else:
-            sigma = frame['SplineMPEBootstrapVectStats']['median']
-            
         # Convert from local to equatorial coordinates
         ra, dec = dir_to_equa(zenith=direction.zenith,
                               azimuth=direction.azimuth,
                               mjd = mjd)
 
+        #===========================================
+        # And the estimated angular uncertainty. 
+        # I think this should have a sindec term, but 
+        # this matches what was done in the past for now.
+        #===========================================
+        if frame['SplineMPE_l4Paraboloid'].fit_status == 0:
+            uncorrected_sigma = np.hypot(frame['SplineMPE_l4ParaboloidFitParams'].pbfErr1, 
+                                         frame['SplineMPE_l4ParaboloidFitParams'].pbfErr2) / np.sqrt(2)
+        else:
+            uncorrected_sigma = frame['SplineMPEBootstrapVectStats']['median']
+            
+        if direction.zenith > zen_up_down_split:
+            spline = upgoing_spline
+        else: 
+            spline = downgoing_spline
+
+        correction = scipy.interpolate.splev(np.log10(energy), spline) / 1.1774
+        sigma = uncorrected_sigma * correction
+
+        #===========================================
         # And check the IceTop veto
+        #===========================================
         if frame.Has("IceTopVeto"): pass_veto = not frame["IceTopVeto"].value
         else:                       pass_veto = True
 
@@ -119,7 +98,7 @@ for i3filename in tqdm(filelist):
                          ra,                     # ra
                          dec,                    # dec
                          sigma,                  # sigma
-                         sigma,                  # sigma_noCorrection
+                         uncorrected_sigma,      # sigma_noCorrection
                          pass_veto]              # passed_icetopVeto
         #===========================================
         # Monte Carlo keys:
@@ -141,12 +120,12 @@ for i3filename in tqdm(filelist):
             # work for cases when we have only non-overlapping MC sets.
             #===========================================
             mcweightdict = frame['I3MCWeightDict']
-            ow = mcweightdict['OneWeight'] / mcweightdict['NEvents'] / args.nfiles
+            ow = mcweightdict['OneWeight'] / mcweightdict['NEvents']
             if 'TypeWeight' in mcweightdict: 
                 ow /= mcweightdict['TypeWeight']
             else:
-                if primary.pdg_encoding > 0: ow /= args.nu_fraction
-                else: ow /= 1-args.nu_fraction
+                if primary.pdg_encoding > 0: ow /= nu_fraction
+                else: ow /= 1-nu_fraction
 
             # NuSources reports fluxes as the sum of nu and nubar fluxes.
             # To correctly handle this down the road, we need to correct
@@ -172,10 +151,97 @@ for i3filename in tqdm(filelist):
 
         output.append(tuple(current_event))
 
-#----------------------------------------------------
-# Convert the output list into a numpy array and save it
-#----------------------------------------------------
-if is_mc: dtype += mc_dtype
+    #----------------------------------------------------
+    # Generate the output filename
+    #----------------------------------------------------
+    outfile_name = os.path.basename(i3filename)
+    if is_mc:
+        outfile_name = outfile_name.replace("Level3_","PSTracks_")
+        outfile_name = ".".join(outfile_name.split(".")[:3])
+        outfile = os.path.join(outdir, outfile_name)
+    else:
+        outfile_name = outfile_name.split(".")[0]
+        outfile = os.path.join(outdir, outfile_name + ".npy")
+            
+    #----------------------------------------------------
+    # Convert the output list into a numpy array with the appropriate datatype
+    #----------------------------------------------------
+    dtype = [('run', np.int64), ('subevent', np.int32), ('event', np.int64),
+             ('time', np.float64), ('logE', np.float32),
+             ('ra', np.float32), ('dec', np.float32), 
+             ('sigma', np.float32), ('sigma_noCorrection', np.float32),
+             ('passed_IceTopVeto', bool)]
+    if is_mc:
+        dtype += [('ow', np.float64), ('trueE', np.float32),
+                  ('trueRa', np.float32), ('trueDec', np.float32),
+                  ('trueAzi', np.float32), ('trueZen', np.float32)]
 
-output = np.array(output, dtype=dtype)
-np.save(args.output, output)
+    output = np.array(output, dtype=dtype)
+
+    #----------------------------------------------------
+    # Save it
+    #----------------------------------------------------
+    np.save(outfile, output)
+    return
+
+
+#----------------------------------------------------
+# Build a main function
+#----------------------------------------------------
+if __name__ == "__main__":
+    #----------------------------------------------------
+    # Build our argument parser.
+    #----------------------------------------------------
+    parser = ArgumentParser(description="Base script for converting i3 files to NuSources-compatible"
+                            " npy files for use in csky and skyllh.")
+    parser.add_argument("upgoing_input", metavar="i3file", type=str,
+                        nargs="+", default=[],
+                        help='Directory or file to include')
+    parser.add_argument("--outdir", "-o", dest="outdir", type=str,
+                        action = "store", default="", required=True,
+                        help = "The path to write output npy files to")
+    parser.add_argument("--nu_fraction", type=float, action="store", default=0.5,
+                        help="What fraction of this simulation is neutrinos? Note that if there's an S-frame that's"
+                        " compatible with simweights or a TypeWeight key in the I3MCWeightDict, this option will be"
+                        " ignored in favor of what's in the file.")
+    parser.add_argument("--pull-correction-dir", type=str, 
+                        default="/cvmfs/icecube.opensciencegrid.org/users/NeutrinoSources/pstracks/pstracks_icetray_v01.10.0_py3v4.3.0.RHEL_7_x86_64/pstracks/resources/pull/",
+                        help=("Path to the location of the pull correction spline files. We will read"
+                              " upgoing_spline_gamma2.0.npy and downgoing_spline_gamma2.0.npy from this location."))
+    parser.add_argument("--test", action='store_true', default=False,
+                        help="If given, only process 10 files.")
+    args = parser.parse_args()
+    
+    #----------------------------------------------------
+    # Build the file list from the input
+    #----------------------------------------------------
+    upgoing_filelist = []
+    for path in args.upgoing_input:
+        if os.path.isdir(path):
+            upgoing_filelist += glob(os.path.join(path, "*upgoing*.i3*"))
+        elif os.path.isfile(path) and 'upgoing' in os.path.basename(path):
+            upgoing_filelist.append(path)
+
+    if args.test and len(upgoing_filelist) > 10:
+        print("Test run requested: shortening infiles list to a maximum of 10 files")
+        upgoing_filelist = upgoing_filelist[:10]
+
+    #----------------------------------------------------
+    # Read the pull correction splines. If reco_zen above 85 degrees, then is "upgoing"
+    #----------------------------------------------------
+    upgoing_pull_file = os.path.join(args.pull_correction_dir, "upgoing_spline_gamma2.0.npy")
+    upgoing_spline = np.load(upgoing_pull_file, allow_pickle=True, encoding='latin1')
+    downgoing_pull_file = os.path.join(args.pull_correction_dir, "downgoing_spline_gamma2.0.npy")
+    downgoing_spline = np.load(downgoing_pull_file, allow_pickle=True, encoding='latin1')
+
+    #----------------------------------------------------
+    # Start walking through the files
+    #----------------------------------------------------
+    for i3filename in tqdm(upgoing_filelist):
+        process_file(upgoing_filename = i3filename, 
+                     downgoing_filename = i3filename.replace("upgoing", "downgoing"), 
+                     outdir = args.outdir,
+                     upgoing_spline = upgoing_spline, 
+                     downgoing_spline = downgoing_spline, 
+                     zen_up_down_split = 85*I3Units.degree, 
+                     nu_fraction = args.nu_fraction)
