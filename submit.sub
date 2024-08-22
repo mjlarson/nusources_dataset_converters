@@ -2,13 +2,15 @@ executable = /usr/bin/env
 Arguments = $(cmd)
 
 # All logs will go to a single file 
-log = $(log_dir)/$(job_name).log
-output = $(log_dir)/$(job_name).out
-error = $(log_dir)/$(job_name).err
+log = /dev/null
+output = /dev/null
+error = /dev/null
 
 getenv = False
 
-request_memory = 2000MB 
+initialdir = /data/user/mlarson/icetray/scripts/pstracks/nusources_dataset_converters/
+
+request_memory = 8000MB 
 request_disk = 1000MB 
 
 Universe        = vanilla 
