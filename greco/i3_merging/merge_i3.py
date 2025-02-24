@@ -138,6 +138,9 @@ def read(gcd, prereco, postreco, output_filename, tolerance):
                 
             event = frame['I3EventHeader'].event_id
             events_passing_postreco.append(event)
+
+            # While here, delete the nestle info. It's just wasting space.
+            del frame['Pegleg_Fit_Nestle_NestleMinimizer']
             output.push(frame)
         i3file.close()        
     output.close()
@@ -145,19 +148,20 @@ def read(gcd, prereco, postreco, output_filename, tolerance):
     print('post', len(events_passing_postreco))
     if not all_good:
         os.remove(output_filename)
-        return False
+        print("Not all events were reconstructed!")
+        raise AssertionError
     elif len(events_passing_prereco) == len(events_passing_postreco):
         print("Events match!")
-    elif len(events_passing_prereco) - len(events_passing_postreco) < tolerance:
+    elif (len(events_passing_prereco) - len(events_passing_postreco))/len(events_passing_prereco) - 1 < tolerance:
         print("Found a different number of events pre ({}) vs post ({}) reco.".format(len(events_passing_prereco),
                                                                                       len(events_passing_postreco)))
-        print(f"But it's close (< {tolerance} events), so I'll pass it.")
+        print(f"But it's close (< {tolerance*100}%), so I'll pass it.")
     else:
         print("Found a different number of events pre ({}) vs post ({}) reco.".format(len(events_passing_prereco),
                                                                                       len(events_passing_postreco)))
-        print(f"It's not close (> {tolerance} events difference), so this file fails.")
+        print(f"It's not close (> {tolerance*100}% difference), so this file fails.")
         os.remove(output_filename)
-        return False
+        raise AssertionError
     return True
 
 if __name__ == "__main__":
@@ -168,7 +172,7 @@ if __name__ == "__main__":
     parser.add_argument("--pre", type=str, default=[], action='append')
     parser.add_argument("--post", type=str, default=[], action='append', required=True)
     parser.add_argument("--output", type=str, required=True)
-    parser.add_argument("--tol", type=int, default=20)
+    parser.add_argument("--tol", type=int, default=0.01)
     
     args = parser.parse_args()
     
